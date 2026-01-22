@@ -1,0 +1,13 @@
+matplotlib
+openpyxl
+pyarrow
+langchain_core
+langgraph
+langchain
+databricks-langchain
+langchain_groq
+graphviz
+databricks-sql-connector
+langchain-text-splitters
+sentence-transformers
+faiss-cpu
