@@ -14,6 +14,7 @@ from backend.code_generation.routes.routes import router as codegen_router
 from backend.data_modelling.routes.routes import router as modeling_router
 from backend.chat.routes.routes import router as chat_router
 from backend.metadata.routes.routes import router as metadata_router
+from backend.auth.routes import router as auth_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,6 +31,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+app.include_router(auth_router)
 app.include_router(setup_router)
 app.include_router(
     design_router, 

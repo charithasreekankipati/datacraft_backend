@@ -5,10 +5,9 @@ class DQExpectationResponse(BaseModel):
     table: str
     rule_name: str
     condition: str
-    enforcement: str  # FAIL, DROP, or LOG
+    enforcement: str  
 
 class GenerateCodeRequest(BaseModel):
-    # Matches the config object in MaskingPanel.tsx
     pii_access_mode: str = "group"
     pii_access_value: str = "pii_access"
     phi_access_mode: str = "group"
@@ -24,7 +23,7 @@ class CodeGenerationResponse(BaseModel):
 
 class ExecutionLogEntry(BaseModel):
     timestamp: str
-    level: str  # info, warning, error
+    level: str  
     message: str
 
 class ExecutionResponse(BaseModel):

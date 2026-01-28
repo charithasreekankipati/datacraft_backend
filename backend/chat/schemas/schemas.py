@@ -10,10 +10,9 @@ class ChatMessageSchema(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     conversation_history: List[ChatMessageSchema]
-    # These are needed to identify which data state the user is chatting about
     catalog: Optional[str] = None
     schema_name: Optional[str] = None
 
 class ChatResponse(BaseModel):
     response: str
-    agent: str  # The name of the specific agent that answered (QnA, SystemAssessment, etc.)
+    agent: str  

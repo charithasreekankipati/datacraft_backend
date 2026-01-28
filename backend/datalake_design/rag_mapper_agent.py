@@ -33,16 +33,19 @@ def _safe_json(text: str) -> dict:
 from pydantic import BaseModel, Field
 
 class ColumnSummary(BaseModel):
-    description: str
-    semantic_type: Optional[str] = None
-    role: Optional[str] = None
+    description: str = Field(..., description="Semantic description of the column")
+    semantic_type: str = Field(default="text")
+    role: str = Field(default="attribute")
     business_entities: List[str] = Field(default_factory=list)
     examples: List[str] = Field(default_factory=list)
 
 class DFColSummary(BaseModel):
-    df_summary: str
+    df_summary: str = Field(..., description="High-level summary of the table's purpose")
     dataset_entities: List[str] = Field(default_factory=list)
-    column_summaries: Dict[str, ColumnSummary]
+    column_summaries: Dict[str, ColumnSummary] = Field(
+        ..., 
+        description="A dictionary mapping EVERY column name to its specific metadata"
+    )
 
 
 # def _summarize_dataframe_and_columns(df_name: str, df: pd.DataFrame) -> Tuple[str, Dict[str, str]]:
@@ -96,12 +99,19 @@ def _summarize_dataframe_and_columns(df_name: str, df: pd.DataFrame) -> Tuple[st
     }
 
     try:
-        resp: DFColSummary = llm.with_structured_output(DFColSummary).invoke(
+        # resp: DFColSummary = llm.with_structured_output(DFColSummary,method="function_calling").invoke(
+        #     [{"role": "system", "content": system},
+        #      {"role": "user", "content": json.dumps(user, ensure_ascii=False)}]
+        # )
+        # Inside _summarize_dataframe_and_columns
+        structured_llm = llm.with_structured_output(DFColSummary, method="function_calling")
+        resp: DFColSummary = structured_llm.invoke(
             [{"role": "system", "content": system},
              {"role": "user", "content": json.dumps(user, ensure_ascii=False)}]
         )
+        logger.info(f"DEBUG: Raw LLM Object: {resp}")
+
         df_summary_rich = resp.df_summary
-        # We keep the original interface (Dict[str, str]) for the rest of the pipeline
         col_summaries_str = {}
         for col, meta in resp.column_summaries.items():
             tag_entities = f" entities={','.join(meta.business_entities)}" if meta.business_entities else ""
@@ -115,13 +125,20 @@ def _summarize_dataframe_and_columns(df_name: str, df: pd.DataFrame) -> Tuple[st
         # st.info(col_summaries_str)
         return df_summary_rich, col_summaries_str
 
-    except Exception:
-        # Fallback: conservative, but we still build reasonable strings
-        df_summary_fallback = f'{df_name} with {len(df)} rows and {df.shape[1]} columns.'
-        col_summaries_str = {}
-        for c in df.columns:
-            samples = ", ".join(map(str, df[c].dropna().astype(str).head(3).tolist()))
-            col_summaries_str[c] = f'Column "{c}" (dtype={dtypes.get(c)}), e.g., {samples}'
+    # except Exception as e:
+    #     logger.error(f"Summary Error: {e}")
+    #     # Fallback: conservative, but we still build reasonable strings
+    #     df_summary_fallback = f'{df_name} with {len(df)} rows and {df.shape[1]} columns.'
+    #     col_summaries_str = {}
+    #     for c in df.columns:
+    #         samples = ", ".join(map(str, df[c].dropna().astype(str).head(3).tolist()))
+    #         col_summaries_str[c] = f'Column "{c}" (dtype={dtypes.get(c)}), e.g., {samples}'
+    #     return df_summary_fallback, col_summaries_str
+    except Exception as e:
+        logger.error(f"Summary Error: {e}")
+        # FALLBACK: If this hits, RAG will likely return 'Unknown' because the context is too weak
+        df_summary_fallback = f"Table {df_name} containing health data."
+        col_summaries_str = {c: f"Data column {c}" for c in df.columns}
         return df_summary_fallback, col_summaries_str
 
 
@@ -130,6 +147,7 @@ def _search_with_scores(vs, query: str, k: int) -> List[Dict]:
     """Try to get (doc, score); fall back to docs only."""
     try:
         results = vs.similarity_search_with_score(query, k=k)
+        print(f"DEBUG: Found {len(results)} matches for {query[:30]}")
         print(f"DEBUG: Vector Search found {len(results)} results for query: {query[:50]}...")
         out = []
         for d, score in results:
@@ -403,8 +421,9 @@ def get_rag_mapper_agent(
         mapping_rows, rag_evidence = [], {}
 
         for df_name, df in working_dfs.items():
-            logger.info(f"[{label}Mapper] Summarizing and Mapping table: {df_name}")
+            logger.info(f"DEBUG: Processing {df_name} with columns: {df.columns.tolist()}")
             df_sum, col_sum = _summarize_dataframe_and_columns(df_name, df)
+            logger.info(f"DEBUG: LLM returned {len(col_sum)} columns for mapping")
 
             time.sleep(2.0)
 
@@ -414,7 +433,7 @@ def get_rag_mapper_agent(
 
             for col_name, col_sum_text in col_sum.items():
 
-                time.sleep(2.0)
+                logger.info(f"DEBUG: Attempting RAG for column: {col_name}")
                 samples = df[col_name].dropna().astype(str).head(3).tolist() if col_name in df.columns else []
 
                 # Perform RAG + LLM call
@@ -439,6 +458,13 @@ def get_rag_mapper_agent(
                     }
                 except Exception as col_err:
                     logger.error(f"Failed mapping for {df_name}.{col_name}: {col_err}")
+                    # ADD THIS FALLBACK:
+                    mapping_rows.append({
+                        "bronze_table": df_name,
+                        "bronze_columns": col_name,
+                        "silver_table": "mapping_failed",
+                        "silver_column": "check_logs"
+                    })
 
         return state.copy(update={
             "dfs": working_dfs, # Store reconstructed dfs back into state
@@ -558,8 +584,8 @@ def _llm_choose_mapping_custom(context_json: str) -> Dict:
 
 def get_custom_schema_rag_mapper_agent(
     uploaded_schema_path: str,
-    k_res: int = 5,
-    k_col: int = 8,
+    k_res: int = 10,
+    k_col: int = 15,
 ):
     """
     Custom schema mapper — mirrors get_rag_mapper_agent but uses a user-uploaded schema

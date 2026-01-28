@@ -2,10 +2,24 @@ from fastapi import APIRouter, HTTPException, Query
 import logging
 from datetime import datetime
 from typing import List
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+base_dir = Path(__file__).resolve().parent.parent.parent.parent
+env_path = base_dir / '.env'
+
+load_dotenv(dotenv_path=env_path)
+
+print(f"--- DEBUGGING ENV LOAD ---")
+print(f"Looking for .env at: {env_path}")
+print(f"File exists: {env_path.exists()}")
+print(f"HOST Loaded: {bool(os.getenv('DATABRICKS_HOST'))}")
+print(f"--------------------------")
 
 from backend.code_generation.schemas.schemas import (
     DQExpectationResponse, GenerateCodeRequest, 
-    CodeGenerationResponse, ExecutionResponse
+    CodeGenerationResponse, ExecutionResponse, ExecutionLogEntry
 )
 from backend.state_store import agent_states
 from backend.code_generation.bricks_medallion_agent import bricks_medallion_agent_node
@@ -91,10 +105,28 @@ async def execute_masking(catalog: str, schema: str):
     
     if not sql:
         raise HTTPException(status_code=400, detail="No masking SQL found to execute.")
+    
+    DATABRICKS_HOST = os.getenv("DATABRICKS_HOST")
+    DATABRICKS_HTTP_PATH = os.getenv("DATABRICKS_HTTP_PATH")
+    DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
+
+    missing_vars = []
+    if not DATABRICKS_HOST: missing_vars.append("DATABRICKS_HOST")
+    if not DATABRICKS_HTTP_PATH: missing_vars.append("DATABRICKS_HTTP_PATH")
+    if not DATABRICKS_TOKEN: missing_vars.append("DATABRICKS_TOKEN")
+
+    if missing_vars:
+        error_msg = f"Missing environment variables: {', '.join(missing_vars)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
 
     # Call the execution helper (run_masking_sql.py)
-    # Note: In a real app, connection details come from env/secrets
-    result = execute_sql_against_databricks(sql)
+    result = execute_sql_against_databricks(
+        masking_sql=sql,
+        host=DATABRICKS_HOST,
+        http_path=DATABRICKS_HTTP_PATH,
+        access_token=DATABRICKS_TOKEN
+    )
     
     logs = [
         ExecutionLogEntry(

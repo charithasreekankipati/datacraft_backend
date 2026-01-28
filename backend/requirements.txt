@@ -11,3 +11,6 @@ databricks-sql-connector
 langchain-text-splitters
 sentence-transformers
 faiss-cpu
+msal
+pyjwt
+python-multipart

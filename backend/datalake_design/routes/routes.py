@@ -65,20 +65,31 @@ async def run_rag_mapping(
             # Standard FHIR/ACORD RAG Agent
             node, _ = get_rag_mapper_agent(standard=standard.lower())
         
-        # 4. Execute Node
-        # The node now receives a state that definitely has .dfs populated
-        updated_state = node(current_state)
 
-        bronze_sensitivity = getattr(updated_state, "bronze_sensitivity_map", {})
+        # 4. Execute Node
+        # Capture the result of the node execution correctly
+        updated_state = node(current_state) 
+        
+        # Get the nested bronze metadata: {"table_name": {"col_name": "PII/PHI"}}
+        bronze_metadata = getattr(updated_state, "sensitive_metadata", {}).get("bronze", {})
         
         enriched_mappings = []
         for row in (updated_state.mapping_rows or []):
+            table_name = row.get("bronze_table")
             bronze_col = row.get("bronze_columns")
-            classification = bronze_sensitivity.get(bronze_col, "NON_SENSITIVE")
             
-            row["classification"] = classification
+            # 1. Get the sensitivity map for THIS specific table
+            table_sensitivity = bronze_metadata.get(table_name, {})
+            
+            # 2. Get the specific label for THIS column
+            # This will now correctly find "PII" or "PHI"
+            label = table_sensitivity.get(bronze_col, "NON_SENSITIVE")
+            
+            row["classification"] = label
+                
             enriched_mappings.append(row)
 
+        # Update the state with the enriched rows and save
         updated_state.mapping_rows = enriched_mappings
         agent_states[state_id] = updated_state
         
